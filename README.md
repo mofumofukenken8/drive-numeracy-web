@@ -36,3 +36,7 @@ Google Cloud コンソール →「APIとサービス」→「認証情報」で
 python -m http.server 8000
 ```
 `http://localhost:8000/?mock=1` を開くと、Gemini を呼ばずにダミー音声で全体の流れを試せる。
+
+## legacy-artifact/
+端末の声(Web Speech)で動く、以前のClaudeページ版のHTMLと進行用スクリプト(記録用)。
+共通の問題生成(`js/core.js`・`js/content-*.js`)はルートのものと同じ。公開中の最新版は Claude のページ側にある。

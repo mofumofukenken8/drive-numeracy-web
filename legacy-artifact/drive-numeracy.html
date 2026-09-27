@@ -1,0 +1,230 @@
+<title>通勤数感ドリル</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo+Mono:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0d1318">
+<style>
+  /* 単一テーマ:夜の車内でも眩しくない計器パネル */
+  :root{
+    --ground:#0d1318; --panel:#151d24; --line:#24303a; --text:#e6ecf0;
+    --muted:#8595a2; --amber:#ffb23f; --teal:#58c7ae; --red:#ff6b5e; --ink:#1a1206;
+    --jp:"Zen Kaku Gothic New","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+    --num:"Chivo Mono",ui-monospace,"SF Mono",Menlo,monospace;
+    color-scheme:dark;
+  }
+  html,body{height:100%}
+  [hidden]{display:none!important}
+  body{background:var(--ground);color:var(--text);font-family:var(--jp);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .app{max-width:560px;margin:0 auto;padding-inline:16px;padding-block:16px 40px;min-height:100%;box-sizing:border-box;display:flex;flex-direction:column}
+  section{display:flex;flex-direction:column;gap:22px}
+  h1{font-size:22px;font-weight:700;margin:0;letter-spacing:.02em}
+  h2{font-size:26px;margin:0;text-wrap:balance}
+  .brand{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .brand small{font-family:var(--num);color:var(--muted);font-size:12px;letter-spacing:.08em}
+  .label{font-size:12px;letter-spacing:.14em;color:var(--muted);font-weight:500}
+  .group{display:flex;flex-direction:column;gap:10px}
+  button{font-family:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+  .lede{color:var(--muted);margin:0;font-size:15px;text-wrap:pretty}
+  .hint{color:var(--muted);margin:0;font-size:13px;text-wrap:pretty}
+
+  .stats{display:flex;gap:24px;font-size:13px;color:var(--muted)}
+  .stats b{font-family:var(--num);font-size:20px;color:var(--text);display:block;font-weight:600}
+
+  /* モード */
+  .modes{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+  .mode{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:left;display:flex;flex-direction:column;gap:4px}
+  .mode b{font-size:16px;font-weight:700}
+  .mode span{font-size:12px;color:var(--muted);line-height:1.5}
+  .mode em{font-style:normal;font-size:12px;font-weight:700;color:var(--amber)}
+  .mode[aria-pressed="true"]{border-color:var(--amber);background:#211a10}
+
+  .seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .seg button{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 6px;font-size:15px;text-align:center}
+  .seg button b{display:block;font-family:var(--num);font-size:20px;font-weight:600}
+  .seg button.word b{font-family:var(--jp);font-size:17px}
+  .seg button span{font-size:12px;color:var(--muted)}
+  .seg button[aria-pressed="true"]{border-color:var(--amber);background:#211a10}
+  .seg button[aria-pressed="true"] b{color:var(--amber)}
+
+  .rows{display:flex;flex-direction:column}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+  .rows .row:last-child{border-bottom:1px solid var(--line)}
+  .row label{flex:1 1 auto}
+  .row select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:15px;font-family:inherit;max-width:100%;flex:0 1 230px}
+  .row input[type=range]{flex:0 1 180px;accent-color:var(--amber)}
+  .row output{font-family:var(--num);font-size:14px;color:var(--amber);min-width:3.2em;text-align:right}
+  .switch{appearance:none;-webkit-appearance:none;width:48px;height:28px;border-radius:999px;background:var(--line);position:relative;transition:background .2s;flex:none;margin:0}
+  .switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:var(--text);transition:transform .2s}
+  .switch:checked{background:var(--amber)}
+  .switch:checked::after{transform:translateX(20px);background:var(--ink)}
+  .tests{display:flex;gap:8px;flex-wrap:wrap}
+  .small{background:transparent;border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-size:14px}
+
+  .go{background:var(--amber);color:var(--ink);border:0;border-radius:16px;padding:22px;font-size:22px;font-weight:700;letter-spacing:.06em;width:100%}
+  .go:active{transform:scale(.99)}
+  .note{font-size:13px;color:var(--muted);margin:0;text-wrap:pretty}
+  .note strong{color:var(--text)}
+  .warn{color:var(--red);font-size:13px;margin:0}
+
+  /* 走行中 */
+  #drive{flex:1;gap:16px}
+  .gauge{position:relative;width:min(280px,72vw);margin:0 auto;aspect-ratio:1.6;max-width:100%}
+  .gauge svg{width:100%;height:100%;display:block;overflow:visible}
+  .gauge .read{position:absolute;left:0;right:0;bottom:4%;text-align:center}
+  .gauge .read b{font-family:var(--num);font-size:42px;font-weight:600;line-height:1;display:block;font-variant-numeric:tabular-nums}
+  .gauge .read span{font-size:12px;color:var(--muted);letter-spacing:.12em}
+  .phase{display:flex;justify-content:center;gap:6px}
+  .phase i{font-style:normal;font-size:13px;padding:4px 12px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .phase i.on{border-color:var(--amber);color:var(--ink);background:var(--amber);font-weight:700}
+  .qcard{background:var(--panel);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:10px;min-height:190px}
+  .qcard .cat{font-size:12px;letter-spacing:.14em;color:var(--amber)}
+  .qcard .q{font-size:20px;line-height:1.6;font-weight:500;margin:0;text-wrap:pretty;white-space:pre-line}
+  .qcard .who{color:var(--muted);font-size:14px;display:block}
+  .qcard .ans{font-size:24px;font-weight:700;color:var(--amber);margin:0;white-space:pre-line}
+  .qcard .exp{font-size:15px;color:var(--muted);margin:0}
+  .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+  .bar div{height:100%;background:var(--amber);width:0;transition:width .25s linear}
+  .controls{display:grid;grid-template-columns:1fr 2fr 1fr;gap:10px;margin-top:auto}
+  .controls button{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 6px;font-size:15px}
+  .controls .big{background:transparent;border:2px solid var(--amber);color:var(--amber);font-size:20px;font-weight:700}
+  .controls .big.paused{background:var(--amber);color:var(--ink)}
+
+  /* 終了・見直し */
+  .summary{display:flex;gap:28px}
+  .summary b{font-family:var(--num);font-size:34px;color:var(--amber);display:block;line-height:1.1;font-weight:600}
+  .summary span{font-size:12px;color:var(--muted);letter-spacing:.1em}
+  .log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+  .log li{padding:14px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:start}
+  .log .body{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .log .tag{font-size:12px;color:var(--muted);letter-spacing:.08em}
+  .log .q{font-size:15px;white-space:pre-line;overflow-wrap:anywhere}
+  .log .a{color:var(--amber);font-weight:700;font-size:15px;white-space:pre-line}
+  .log .e{color:var(--muted);font-size:13px}
+  .marks{display:flex;gap:6px}
+  .marks button{width:44px;height:44px;border-radius:50%;background:transparent;border:1px solid var(--line);font-size:18px;font-weight:700;color:var(--muted)}
+  .marks button.ok[aria-pressed="true"]{background:var(--teal);border-color:var(--teal);color:var(--ink)}
+  .marks button.ng[aria-pressed="true"]{background:var(--red);border-color:var(--red);color:var(--ink)}
+  .levelnote{margin:0;font-size:15px;white-space:pre-line;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="app">
+  <!-- 設定 -->
+  <section id="setup">
+    <header class="brand"><h1>通勤数感ドリル</h1><small>VER.2 · AUDIO</small></header>
+    <p class="lede">聞く → 頭に留める → 考える → 声に出す。画面を見ずに、運転中の片道で「数字を聞き取る力」と「数字で考える力」を鍛えます。</p>
+
+    <div class="stats">
+      <div><b id="stSessions">0</b>回走行</div>
+      <div><b id="stQuestions">0</b>問</div>
+      <div><b id="stLast">—</b>前回</div>
+    </div>
+    <p class="hint" id="syncNote">記録の保存先を確認しています…</p>
+
+    <div class="group">
+      <span class="label">トレーニング</span>
+      <div class="modes" id="modeList"></div>
+    </div>
+
+    <div class="group">
+      <span class="label">コースの長さ</span>
+      <div class="seg" id="durSeg">
+        <button type="button" data-v="10"><b>10</b><span>分</span></button>
+        <button type="button" data-v="20"><b>20</b><span>分</span></button>
+        <button type="button" data-v="30"><b>30</b><span>分</span></button>
+      </div>
+    </div>
+
+    <div class="group">
+      <span class="label">考える時間</span>
+      <div class="seg" id="thinkSeg">
+        <button type="button" data-v="10"><b>10</b><span>秒 · 速め</span></button>
+        <button type="button" data-v="15"><b>15</b><span>秒 · 標準</span></button>
+        <button type="button" data-v="25"><b>25</b><span>秒 · じっくり</span></button>
+      </div>
+    </div>
+
+    <div class="group">
+      <span class="label">聞き取りサポート</span>
+      <div class="seg" id="supportSeg">
+        <button type="button" class="word" data-v="2"><b>手厚い</b><span>ゆっくり · 2回</span></button>
+        <button type="button" class="word" data-v="1"><b>標準</b><span>問いが先 · 2回</span></button>
+        <button type="button" class="word" data-v="0"><b>なし</b><span>自然な順 · 1回</span></button>
+      </div>
+      <p class="hint" id="supportHint"></p>
+    </div>
+
+    <div class="group">
+      <span class="label">声</span>
+      <div class="rows">
+        <div class="row"><label for="voiceA">メインの声</label><select id="voiceA"></select></div>
+        <div class="row"><label for="voiceB">会話の相手の声</label><select id="voiceB"></select></div>
+        <div class="row"><label for="rate">話す速さ</label><input type="range" id="rate" min="0.8" max="1.2" step="0.05" value="1"><output id="rateOut" for="rate">1.00</output></div>
+        <div class="row"><label for="optAnchor">出発時に数字を覚えて、最後に思い出す</label><input type="checkbox" class="switch" id="optAnchor" checked></div>
+      </div>
+      <div class="tests">
+        <button type="button" class="small" id="testA">メインの声を試す</button>
+        <button type="button" class="small" id="testB">相手の声を試す</button>
+      </div>
+      <p class="hint" id="voiceHint"></p>
+    </div>
+
+    <button class="go" id="startBtn" type="button">出発前にスタート</button>
+    <p class="warn" id="voiceWarn" hidden>この端末では音声の読み上げが使えません。iPhoneのSafariで開いてください。</p>
+    <p class="note"><strong>運転中は画面に触れないでください。</strong>停車中にスタートすれば、終わるまで自動で進みます。画面が消えると止まるため、自動ロックは「なし」がおすすめです。</p>
+  </section>
+
+  <!-- 走行中 -->
+  <section id="drive" hidden>
+    <header class="brand"><h1>通勤数感ドリル</h1><small id="blockLabel">—</small></header>
+    <div class="gauge" aria-hidden="true">
+      <svg viewBox="0 0 200 125">
+        <path d="M20 115 A80 80 0 0 1 180 115" fill="none" stroke="#24303a" stroke-width="10" stroke-linecap="round"/>
+        <path id="arc" d="M20 115 A80 80 0 0 1 180 115" fill="none" stroke="#ffb23f" stroke-width="10" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
+        <g id="ticks"></g>
+      </svg>
+      <div class="read"><b id="remain">20:00</b><span>残り時間</span></div>
+    </div>
+    <div class="phase"><i id="phQ">聞く</i><i id="phT">考える</i><i id="phA">答え</i></div>
+    <article class="qcard" aria-live="polite">
+      <span class="cat" id="qCat">準備中</span>
+      <p class="q" id="qText">まもなく始まります。</p>
+      <div class="bar"><div id="thinkBar"></div></div>
+      <p class="ans" id="qAns" hidden></p>
+      <p class="exp" id="qExp" hidden></p>
+    </article>
+    <div class="controls">
+      <button type="button" id="repeatBtn">もう一度</button>
+      <button type="button" class="big" id="pauseBtn">一時停止</button>
+      <button type="button" id="endBtn">終了</button>
+    </div>
+  </section>
+
+  <!-- 到着後 -->
+  <section id="done" hidden>
+    <header class="brand"><h1>通勤数感ドリル</h1><small>ARRIVED</small></header>
+    <h2>お疲れさまでした</h2>
+    <div class="summary">
+      <div><b id="sumQ">0</b><span>問</span></div>
+      <div><b id="sumMin">0</b><span>分</span></div>
+    </div>
+    <div class="group">
+      <span class="label">見直しと○×</span>
+      <p class="hint">できた問題に○、できなかった問題に×をつけて記録すると、次回のレベルに反映されます。×の問題は、次回の最初に復習として出ます。</p>
+      <ol class="log" id="log"></ol>
+    </div>
+    <button class="go" type="button" id="saveMarks">記録して次回に反映</button>
+    <p class="levelnote" id="levelNote" hidden></p>
+    <button class="small" type="button" id="againBtn">設定に戻る</button>
+  </section>
+</div>
+
+<script src="js/core.js"></script>
+<script src="js/content-basic.js"></script>
+<script src="js/content-biz.js"></script>
+<script src="js/content-memory.js"></script>
+<script src="js/content-listen-a.js"></script>
+<script src="js/content-listen-b.js"></script>
+<script src="js/app.js"></script>
