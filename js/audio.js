@@ -74,22 +74,37 @@
     return pcm.subarray(Math.max(0, s - keep), Math.min(pcm.length, e + keep));
   };
 
-  // MP3にする(失敗したらWAV)。onProgress(0〜1)
-  A.encode = async (pcm, sr, onProgress) => {
-    if (window.lamejs && lamejs.Mp3Encoder) {
-      try {
-        const enc = new lamejs.Mp3Encoder(1, sr, 48), parts = [], step = 1152 * 40;
-        for (let i = 0; i < pcm.length; i += step) {
-          const out = enc.encodeBuffer(pcm.subarray(i, i + step));
-          if (out.length) parts.push(out);
-          if ((i / step) % 20 === 0) { onProgress && onProgress(i / pcm.length); await new Promise(r => setTimeout(r, 0)); }
-        }
-        const end = enc.flush();
-        if (end.length) parts.push(end);
-        onProgress && onProgress(1);
-        return new Blob(parts, { type: 'audio/mpeg' });
-      } catch (e) { console.warn('MP3化に失敗、WAVで保存します', e); }
+  // 問題1つ分をMP3にする。MP3はフレーム単位でそのままつなげられるので、
+  // 作った問題を保存しておけば、次の回は再変換なしで並べるだけで使い回せる
+  A.mp3 = chunks => {
+    const enc = new lamejs.Mp3Encoder(1, DN.gemini.SAMPLE_RATE, 48), parts = [];
+    for (const pcm of chunks) {
+      for (let i = 0; i < pcm.length; i += 1152 * 20) { const b = enc.encodeBuffer(pcm.subarray(i, i + 1152 * 20)); if (b.length) parts.push(b); }
     }
-    return new Blob([A.wav(pcm, sr)], { type: 'audio/wav' });
+    const end = enc.flush();
+    if (end.length) parts.push(end);
+    const bytes = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let o = 0;
+    for (const p of parts) { bytes.set(new Uint8Array(p.buffer, p.byteOffset, p.length), o); o += p.length; }
+    return { blob: new Blob([bytes], { type: 'audio/mpeg' }), sec: A.mp3Seconds(bytes) };
+  };
+
+  // MP3の長さ(秒)をフレームを数えて正確に出す(問題の区切り位置の計算に使う)
+  const BR1 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+  const BR2 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+  const SRS = { 3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000] };
+  A.mp3Seconds = b => {
+    let i = 0, sec = 0;
+    if (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) i = 10 + (((b[6] & 0x7f) << 21) | ((b[7] & 0x7f) << 14) | ((b[8] & 0x7f) << 7) | (b[9] & 0x7f));
+    while (i + 4 <= b.length) {
+      if (b[i] !== 0xff || (b[i + 1] & 0xe0) !== 0xe0) { i++; continue; }
+      const ver = (b[i + 1] >> 3) & 3, layer = (b[i + 1] >> 1) & 3, bri = b[i + 2] >> 4, sri = (b[i + 2] >> 2) & 3, pad = (b[i + 2] >> 1) & 1;
+      if (ver === 1 || layer !== 1 || bri === 0 || bri === 15 || sri === 3) { i++; continue; }
+      const rate = SRS[ver][sri], kbps = (ver === 3 ? BR1 : BR2)[bri];
+      const len = Math.floor((ver === 3 ? 144 : 72) * kbps * 1000 / rate) + pad;
+      sec += (ver === 3 ? 1152 : 576) / rate;
+      i += Math.max(len, 1);
+    }
+    return sec;
   };
 })();

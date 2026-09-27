@@ -1,4 +1,5 @@
-// 1回分(20分など)の問題を選び、Geminiで読み上げを作り、1本の音声にまとめる
+// 1回分(20分など)の問題を選び、Geminiで読み上げを作り、1本の音声にまとめる。
+// 「数字キープ」「考える」「会話」は作った問題を音声ごと問題バンクに保存し、次の回から使い回す
 (() => {
   const U = DN.U, C = DN.C, A = DN.audio, G = DN.gemini, ST = DN.store;
   const K = DN.compose = {};
@@ -18,6 +19,14 @@
     { id: 'biz', name: '仕事の数字', desc: '処理量・燃料費・設備・IT・総務', plan: [['biz', 1]] },
     { id: 'listen', name: '会話の聞き取り', desc: '会議・電話・同業者との会話', plan: [['listen', 1]] },
   ];
+  // 暗算と仕事の数字は答えを覚えてしまうので、使い回さない
+  K.REUSABLE = new Set(['memory', 'think', 'listen']);
+  K.BANK_CAPS = { memory: 60, think: 60, listen: 30 };
+
+  // 使い回せるのは、読み方・考える時間・声が同じときだけ
+  const META_KEYS = ['support', 'think', 'pace', 'voiceA', 'voiceB', 'model'];
+  const metaOf = (P, mock) => ({ support: P.support, think: P.think, pace: P.pace, voiceA: P.voiceA, voiceB: P.voiceB, model: mock ? 'mock' : P.model });
+  const sameMeta = (a, b) => !!a && !!b && META_KEYS.every(k => a[k] === b[k]);
 
   // ---------- 問題 → 読み上げの台本 ----------
   function specScript(it, P) {
@@ -40,7 +49,6 @@
   }
   const qOf = it => it.q || `${(it.body || []).join('、')}${(it.body || []).length ? '。' : ''}${it.ask}`;
 
-  // 台本のおおよその長さ(秒)
   function estimate(script, pace) {
     const cps = pace === 'slow' ? 5.8 : 7;
     return script.reduce((sec, b) => {
@@ -52,10 +60,23 @@
   }
 
   // ---------- 1回分の問題を選ぶ ----------
-  K.plan = P => {
-    const units = [], seen = new Set();
+  K.plan = (P, ctx = {}) => {
+    const units = [], seen = new Set(), usedBank = new Set();
     const mode = K.MODES.find(m => m.id === P.mode) || K.MODES[0];
-    const push = u => { u.est = estimate(u.script, P.pace); units.push(u); return u.est; };
+    const push = u => { u.est = u.est || estimate(u.script, P.pace); units.push(u); return u.est; };
+    const minGap = ctx.mock ? 0 : 20 * 3600e3; // 同じ問題は、少なくとも翌日まで出さない
+    const pickBank = cat => {
+      if (!K.REUSABLE.has(cat) || !(Math.random() < (P.reuse || 0))) return null;
+      const lv = P.levels[cat], now = Date.now();
+      const cands = (ctx.bank || []).filter(b => b.cat === cat && b.lv === lv && sameMeta(b.meta, ctx.meta)
+        && !usedBank.has(b.id) && !seen.has(b.q) && now - (b.lastUsed || 0) >= minGap);
+      if (!cands.length) return null;
+      cands.sort((a, b) => (a.lastUsed || 0) - (b.lastUsed || 0));
+      const b = cands[Math.floor(Math.random() * Math.min(3, cands.length))];
+      usedBank.add(b.id); seen.add(b.q);
+      return b;
+    };
+
     const reviewQ = P.review.slice(0, 3);
     push({ kind: 'greet', label: 'スタート', log: false, script: [{ t: 'say', text: `${mode.name}、${P.dur}分コースを始めます。答えは、声に出して言ってみましょう。${reviewQ.length ? `最初に、前回できなかった問題を${reviewQ.length}問、復習します。` : ''}` }] });
     const anchor = P.anchor ? C.anchor(P.levels.memory) : null;
@@ -67,11 +88,13 @@
     mode.plan.forEach(([cat, share]) => {
       let used = 0, guard = 0;
       while (used < mainSec * share && guard++ < 80) {
-        const lv = P.levels[cat];
+        const lv = P.levels[cat], label = `${K.CATS[cat].name} Lv${lv}`;
+        const b = pickBank(cat);
+        if (b) { used += push({ kind: 'item', label, log: true, bank: b, item: Object.assign({}, b.item), est: b.dur }); continue; }
         let it, n = 0;
         do { it = cat === 'memory' ? C.memory(lv, P.support) : cat === 'listen' ? C.listen(lv, P.support) : C[cat](lv); n++; } while (n < 8 && seen.has(qOf(it)));
         it.q = qOf(it); it.lv = lv; seen.add(it.q);
-        used += push({ kind: 'item', label: `${K.CATS[cat].name} Lv${lv}`, log: true, item: it, script: it.script || specScript(it, P) });
+        used += push({ kind: 'item', label, log: true, eligible: K.REUSABLE.has(cat), item: it, script: it.script || specScript(it, P) });
       }
     });
     if (anchor) push({ kind: 'item', label: '今日の数字', log: true, item: anchor.item, script: anchor.outro });
@@ -101,12 +124,16 @@
   // ---------- 作る ----------
   // onProgress({phase, done, total, wait, frac})
   K.build = async (P, opt = {}) => {
+    if (!(window.lamejs && lamejs.Mp3Encoder)) throw new Error('この端末では音声ファイルを作れません。');
     const sr = G.SAMPLE_RATE, mock = !!opt.mock, signal = opt.signal;
     const say = x => opt.onProgress && opt.onProgress(x);
-    const units = K.plan(P);
-    units.forEach(u => { u.segs = segments(u); });
+    const meta = metaOf(P, mock);
+    const bank = await ST.bankList().catch(() => []);
+    const units = K.plan(P, { bank, meta, mock });
+    const fresh = units.filter(u => !u.bank);
+    fresh.forEach(u => { u.segs = segments(u); });
     const jobs = [];
-    units.forEach(u => u.segs.forEach(s => { if (s.k === 'tts') jobs.push(s); }));
+    fresh.forEach(u => u.segs.forEach(s => { if (s.k === 'tts') jobs.push(s); }));
 
     // 読み上げを作る(同じ内容は保存済みを使う)
     let done = 0, newSec = 0;
@@ -115,7 +142,7 @@
       onWait: ms => say({ phase: 'tts', done, total: jobs.length, wait: ms }) };
     const run = async job => {
       const multi = job.parts.some(p => p.speaker === 'B');
-      const id = await ST.hash(JSON.stringify([mock ? 'mock' : P.model, P.voiceA, multi ? P.voiceB : '', P.pace, job.parts.map(p => [p.text, p.speaker, p.narration ? 1 : 0, p.pause >= 900 ? 2 : p.pause ? 1 : 0])]));
+      const id = await ST.hash(JSON.stringify([meta.model, P.voiceA, multi ? P.voiceB : '', P.pace, job.parts.map(p => [p.text, p.speaker, p.narration ? 1 : 0, p.pause >= 900 ? 2 : p.pause ? 1 : 0])]));
       let pcm = await ST.clipGet(id).catch(() => null);
       if (!pcm) {
         pcm = A.trim(A.parse(await G.tts(job.parts, cfg, signal), sr), sr);
@@ -135,53 +162,54 @@
     };
     await Promise.all(Array.from({ length: Math.min(opt.parallel || 3, jobs.length) }, worker));
 
-    // 1本の音声にまとめる
+    // 問題ごとにMP3にして並べる(バンクの問題は保存済みのMP3をそのまま使う)
     say({ phase: 'mix', frac: 0 });
-    const sink = makeSink(sr), chapters = [], chime = A.chime(sr), beep = A.beep(sr);
+    const chime = A.chime(sr), beep = A.beep(sr), blobs = [], chapters = [], toBank = [], touched = [];
+    let t = 0, reused = 0, created = 0;
     for (let i = 0; i < units.length; i++) {
-      const u = units[i], ch = { t: sink.samples() / sr, label: u.label, log: u.log, answerAt: null };
-      if (u.item) Object.assign(ch, { q: u.item.q, a: u.item.a, e: u.item.e || '', topic: u.item.topic, cat: u.item.cat, lv: u.item.lv, review: !!u.item.review, item: stripItem(u.item) });
-      for (const s of u.segs) {
-        if (s.k === 'chime') sink.add(chime);
-        else if (s.k === 'tts') sink.add(s.pcm);
-        else if (s.k === 'sil') sink.add(A.silence(s.ms, sr));
-        else if (s.k === 'think') { sink.add(A.silence(Math.max(500, s.sec * 1000 - 220), sr)); sink.add(beep); }
-        else if (s.k === 'mark') ch.answerAt = sink.samples() / sr;
+      const u = units[i];
+      let blob, sec, answerOffset = null;
+      if (u.bank) {
+        blob = await ST.bankAudio(u.bank.id).catch(() => null);
+        if (!blob) continue; // 途中で消えていたら、その問題は飛ばす
+        sec = u.bank.dur; answerOffset = u.bank.answerOffset; reused++; touched.push(u.bank.id);
+      } else {
+        const chunks = [];
+        let n = 0;
+        const add = p => { chunks.push(p); n += p.length; };
+        for (const s of u.segs) {
+          if (s.k === 'chime') add(chime);
+          else if (s.k === 'tts') add(s.pcm);
+          else if (s.k === 'sil') add(A.silence(s.ms, sr));
+          else if (s.k === 'think') { add(A.silence(Math.max(500, s.sec * 1000 - 220), sr)); add(beep); }
+          else if (s.k === 'mark') answerOffset = n / sr;
+        }
+        ({ blob, sec } = A.mp3(chunks));
+        if (u.log) created++;
+        if (u.eligible) {
+          toBank.push({ blob, entry: { id: `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, cat: u.item.cat, lv: u.item.lv, q: u.item.q,
+            item: stripItem(u.item), dur: sec, answerOffset, meta, createdAt: Date.now(), lastUsed: Date.now(), uses: 1 } });
+        }
       }
-      chapters.push(ch);
+      const ch = { t, label: u.label, log: u.log, answerAt: answerOffset == null ? null : t + answerOffset, fromBank: !!u.bank };
+      if (u.item) Object.assign(ch, { q: u.item.q, a: u.item.a, e: u.item.e || '', topic: u.item.topic, cat: u.item.cat, lv: u.item.lv, review: !!u.item.review, item: stripItem(u.item) });
+      chapters.push(ch); blobs.push(blob); t += sec;
       say({ phase: 'mix', frac: (i + 1) / units.length });
       await new Promise(r => setTimeout(r, 0));
     }
-    const durationSec = sink.samples() / sr;
-    const blob = sink.finish();
+    for (const { entry, blob } of toBank) await ST.bankAdd(entry, blob).catch(() => {});
+    if (touched.length) await ST.bankTouch(touched).catch(() => {});
+
     const session = {
-      id: `s${Date.now()}`, createdAt: Date.now(), mode: P.mode, dur: P.dur, model: mock ? 'mock' : P.model,
-      durationSec, chapters, blob, newSec, usd: mock ? 0 : newSec * G.TOKENS_PER_SEC * (G.PRICE[P.model] || 9) / 1e6, played: false,
+      id: `s${Date.now()}`, createdAt: Date.now(), mode: P.mode, dur: P.dur, model: meta.model,
+      durationSec: t, chapters, blob: new Blob(blobs, { type: 'audio/mpeg' }), newSec, reused, created, pinned: false,
+      usd: mock ? 0 : newSec * G.TOKENS_PER_SEC * (G.PRICE[P.model] || 9) / 1e6, played: false,
     };
     await ST.sessionPut(session);
     return session;
   };
 
-  // 復習用に保存する問題(読み上げの台本も含める)
   function stripItem(it) { const c = Object.assign({}, it); delete c.review; delete c.mark; return c; }
-
-  // MP3に少しずつ書き込む(メモリを節約)。MP3化できない端末ではWAV
-  function makeSink(sr) {
-    if (window.lamejs && lamejs.Mp3Encoder) {
-      try {
-        const enc = new lamejs.Mp3Encoder(1, sr, 48), out = [];
-        let n = 0;
-        return {
-          add(pcm) { for (let i = 0; i < pcm.length; i += 1152 * 20) { const b = enc.encodeBuffer(pcm.subarray(i, i + 1152 * 20)); if (b.length) out.push(b); } n += pcm.length; },
-          samples: () => n,
-          finish() { const e = enc.flush(); if (e.length) out.push(e); return new Blob(out, { type: 'audio/mpeg' }); },
-        };
-      } catch (e) { console.warn(e); }
-    }
-    const chunks = [];
-    let n = 0;
-    return { add(p) { chunks.push(p); n += p.length; }, samples: () => n, finish: () => new Blob([A.wav(A.concat(chunks), sr)], { type: 'audio/wav' }) };
-  }
 
   // 声を試す:短い文を1つ作って返す
   K.sample = async (P, which) => {

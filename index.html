@@ -50,12 +50,14 @@
 
   /* 作り置き */
   .sessions{display:flex;flex-direction:column;gap:8px}
-  .session{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center}
+  .session{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:6px}
+  .session.pinned{border-color:var(--amber)}
   .session b{font-size:16px}
-  .session span{font-size:13px;color:var(--muted);grid-column:1}
-  .session .acts{grid-column:2;grid-row:1/span 2;display:flex;gap:8px}
-  .session .play{background:var(--amber);color:var(--ink);border:0;border-radius:12px;padding:12px 18px;font-weight:700;font-size:16px}
-  .session .del{background:transparent;border:1px solid var(--line);border-radius:12px;padding:12px;font-size:14px;color:var(--muted)}
+  .session span{font-size:13px;color:var(--muted)}
+  .session .acts{display:flex;gap:8px;margin-top:4px}
+  .session .play{flex:1;background:var(--amber);color:var(--ink);border:0;border-radius:12px;padding:12px 18px;font-weight:700;font-size:16px}
+  .session .pin,.session .del{background:transparent;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:14px;color:var(--muted)}
+  .session .pin[aria-pressed="true"]{border-color:var(--amber);color:var(--amber);font-weight:700}
   .empty{border:1px dashed var(--line);border-radius:14px;padding:16px;color:var(--muted);font-size:14px;margin:0}
 
   .modes{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
@@ -217,6 +219,16 @@
         <button type="button" data-v="slow"><b>ゆっくり</b><span>数字のあとに間</span></button>
         <button type="button" data-v="normal"><b>ふつう</b><span>会話に近い速さ</span></button>
       </div>
+    </div>
+    <div class="group">
+      <span class="label">問題の使い回し</span>
+      <div class="seg" id="reuseSeg">
+        <button type="button" data-v="0.7"><b>多め</b><span>新しいのは3割</span></button>
+        <button type="button" data-v="0.4"><b>半分</b><span>新しいのは6割</span></button>
+        <button type="button" data-v="0"><b>しない</b><span>毎回すべて新しく</span></button>
+      </div>
+      <p class="hint" id="bankHint"></p>
+      <div class="tests"><button class="small" type="button" id="bankClear">ためた問題を消す</button></div>
     </div>
     <div class="group">
       <span class="label">そのほか</span>

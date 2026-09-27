@@ -1,5 +1,5 @@
 // オフラインでも開けるように、アプリ本体をキャッシュする(音声はIndexedDBに保存)
-const CACHE = 'drive-drill-v1';
+const CACHE = 'drive-drill-v2';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'vendor/lame.min.js',
   'js/core.js', 'js/content-basic.js', 'js/content-biz.js', 'js/content-memory.js', 'js/content-listen-a.js', 'js/content-listen-b.js',

@@ -43,11 +43,16 @@
     list.slice().reverse().forEach(s => {
       const mode = K.MODES.find(m => m.id === s.mode) || K.MODES[0];
       const n = s.chapters.filter(c => c.log).length, d = new Date(s.createdAt);
-      const el = document.createElement('div'); el.className = 'session';
-      el.innerHTML = '<b></b><span></span><div class="acts"><button type="button" class="play">再生</button><button type="button" class="del" aria-label="削除">削除</button></div>';
+      const el = document.createElement('div'); el.className = s.pinned ? 'session pinned' : 'session';
+      el.innerHTML = '<b></b><span></span><div class="acts"><button type="button" class="play">再生</button><button type="button" class="pin"></button><button type="button" class="del" aria-label="削除">削除</button></div>';
       el.querySelector('b').textContent = `${mode.name} · ${Math.round(s.durationSec / 60)}分 · ${n}問`;
-      el.querySelector('span').textContent = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')} 作成${s.played ? ' · 再生済み' : ''}${s.model === 'mock' ? ' · 確認用' : ''}`;
+      el.querySelector('span').textContent = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')} 作成${s.reused ? ` · 使い回し${s.reused}問` : ''}${s.played ? ' · 再生済み' : ''}${s.model === 'mock' ? ' · 確認用' : ''}`;
       el.querySelector('.play').onclick = () => openPlayer(s.id);
+      // 「残す」をつけた回は、自動で消さない
+      const pin = el.querySelector('.pin');
+      pin.textContent = s.pinned ? '★ 残す' : '☆ 残す';
+      pin.setAttribute('aria-pressed', !!s.pinned);
+      pin.onclick = async () => { await ST.sessionPin(s.id, !s.pinned); renderSessions(); };
       el.querySelector('.del').onclick = async () => { if (confirm('この回を削除しますか?')) { await ST.sessionDelete(s.id); renderSessions(); } };
       box.appendChild(el);
     });
@@ -78,7 +83,7 @@
       });
       await pruneSessions();
       const cost = s.usd > 0 ? `新しく作った音声は約${Math.round(s.newSec / 60)}分、料金の目安は約${Math.max(1, Math.round(s.usd * 150))}円(無料枠なら0円)。` : '保存済みの音声だけで作れました。';
-      setMakeHint(`できました(${Math.round(s.durationSec / 60)}分)。${cost}`);
+      setMakeHint(`できました(${Math.round(s.durationSec / 60)}分)。${s.reused ? `${s.reused}問はためた問題を使い回しました。` : ''}${cost}`);
     } catch (e) {
       setMakeHint(e.name === 'AbortError' ? '中止しました。作った分の音声は保存してあるので、次は速く作れます。' : `作れませんでした。${e.message || e}`, e.name !== 'AbortError');
     } finally {
@@ -87,19 +92,29 @@
       show('home'); renderSessions();
     }
   }
-  // 古い回を消す(未再生を優先して残す)
+  // 「残す」がついていない回は3つまで(再生済みの古いものから消す)
   async function pruneSessions() {
-    const list = await ST.sessionList();
-    const keep = Math.max(2, P.keep + 1);
+    const list = (await ST.sessionList()).filter(s => !s.pinned);
     const order = list.slice().sort((a, b) => (a.played === b.played ? a.createdAt - b.createdAt : a.played ? -1 : 1));
-    for (let i = 0; i < order.length - keep; i++) await ST.sessionDelete(order[i].id);
+    for (let i = 0; i < order.length - 3; i++) await ST.sessionDelete(order[i].id);
   }
 
   // ---------- 設定 ----------
   function openSettings() {
     $('apiKey').value = P.key; $('apiKey').type = 'password'; $('keyShow').textContent = '表示';
+    bankHint();
     show('settings');
   }
+  async function bankHint() {
+    const list = await ST.bankList().catch(() => []);
+    const count = cat => list.filter(e => e.cat === cat).length;
+    $('bankHint').textContent = `使い回すのは「数字キープ」「数字で考える」「会話の聞き取り」だけで、暗算と仕事の数字は毎回新しく作ります。同じ問題は翌日以降に出ます。声・速さ・考える時間・聞き取りサポートを変えると、それまでの問題は使い回されません。いまためている問題:数字キープ${count('memory')}問、考える${count('think')}問、会話${count('listen')}問。`;
+  }
+  $('bankClear').onclick = async () => {
+    if (!confirm('ためた問題をすべて消しますか?(作り置きの回は残ります)')) return;
+    await ST.bankClear().catch(() => {});
+    bankHint();
+  };
   function costHint() {
     const usd = 12 * 60 * G.TOKENS_PER_SEC * G.PRICE[P.model] / 1e6;
     $('costHint').textContent = `20分コース1回の料金の目安は約${Math.round(usd * 150)}円(読み上げ約12分として)。無料枠の範囲なら0円です。2027年から単価は2倍になる予定です。`;
@@ -232,6 +247,7 @@
   bindSeg($('supportSeg'), 'support', supHint); supHint();
   bindSeg($('modelSeg'), 'model', costHint, false); costHint();
   bindSeg($('paceSeg'), 'pace', null, false);
+  bindSeg($('reuseSeg'), 'reuse');
   $('optAnchor').checked = P.anchor;
   $('optAnchor').onchange = e => { P.anchor = e.target.checked; save(); };
   $('makeBtn').onclick = make;
@@ -240,6 +256,8 @@
   $('keyWarnBtn').onclick = openSettings;
   $('settingsBack').onclick = () => { P.key = $('apiKey').value.trim(); save(); renderStats(); show('home'); };
   renderStats(); renderModes(); renderSessions();
-  ST.clipsPrune(30).catch(() => {});
+  // 読み上げ部品は2週間、ためた問題は3か月使わなければ消す
+  ST.clipsPrune(14).catch(() => {});
+  ST.bankPrune(K.BANK_CAPS, 90).catch(() => {});
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
